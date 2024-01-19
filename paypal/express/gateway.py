@@ -176,10 +176,10 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         logger.error(msg)
         raise express_exceptions.InvalidBasket(_(msg))
 
-    if amount <= 0:
-        msg = 'The basket total is zero so no payment is required'
-        logger.error(msg)
-        raise express_exceptions.InvalidBasket(_(msg))
+    # if amount <= 0:
+    #     msg = 'The basket total is zero so no payment is required'
+    #     logger.error(msg)
+    #     raise express_exceptions.InvalidBasket(_(msg))
 
     # PAYMENTREQUEST_0_AMT should include tax, shipping and handling
     params.update({
