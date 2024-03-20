@@ -181,6 +181,12 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
     #     logger.error(msg)
     #     raise express_exceptions.InvalidBasket(_(msg))
 
+    is_multi_risk_offer = False
+    for discount in basket.offer_discounts:
+        if discount['offer'].name == "Garantie multi-risques":
+            is_multi_risk_offer = True
+            break
+
     # PAYMENTREQUEST_0_AMT should include tax, shipping and handling
     params.update({
         'PAYMENTREQUEST_0_AMT': amount,
@@ -189,6 +195,7 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         'CANCELURL': cancel_url,
         'PAYMENTREQUEST_0_PAYMENTACTION': action,
     })
+
 
     # Add item details
     index = 0
@@ -203,8 +210,10 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         params['L_PAYMENTREQUEST_0_DESC%d' % index] = desc
         # Note, we don't include discounts here - they are handled as separate
         # lines - see below
-        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
-            line.unit_price_incl_tax)
+        if is_multi_risk_offer is True:
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(D('0.00'))
+        else:
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(line.unit_price_incl_tax)
         params['L_PAYMENTREQUEST_0_QTY%d' % index] = line.quantity
         params['L_PAYMENTREQUEST_0_ITEMCATEGORY%d' % index] = (
             'Physical' if product.is_shipping_required else 'Digital')
@@ -216,14 +225,15 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
     # https://cms.paypal.com/us/cgi-bin/?cmd=_render-content&content_ID=developer/e_howto_api_ECCustomizing
 
     # Iterate over the 3 types of discount that can occur
-    for discount in basket.offer_discounts:
-        index += 1
-        name = _("Special Offer: %s") % discount['name']
-        params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
-        params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
-        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
-            -discount['discount'])
-        params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
+    if is_multi_risk_offer is False:
+        for discount in basket.offer_discounts:
+            index += 1
+            name = _("Special Offer: %s") % discount['name']
+            params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
+            params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
+                -discount['discount'])
+            params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
     for discount in basket.voucher_discounts:
         index += 1
         name = "%s (%s)" % (discount['voucher'].name,
