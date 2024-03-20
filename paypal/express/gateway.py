@@ -176,170 +176,205 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         logger.error(msg)
         raise express_exceptions.InvalidBasket(_(msg))
 
-    if amount <= 0:
-        msg = 'The basket total is zero so no payment is required'
-        logger.error(msg)
-        raise express_exceptions.InvalidBasket(_(msg))
+    # if amount <= 0:
+    #     msg = 'The basket total is zero so no payment is required'
+    #     logger.error(msg)
+    #     raise express_exceptions.InvalidBasket(_(msg))
 
-    # PAYMENTREQUEST_0_AMT should include tax, shipping and handling
-    params.update({
-        'PAYMENTREQUEST_0_AMT': amount,
-        'PAYMENTREQUEST_0_CURRENCYCODE': currency,
-        'RETURNURL': return_url,
-        'CANCELURL': cancel_url,
-        'PAYMENTREQUEST_0_PAYMENTACTION': action,
-    })
-
-    # Add item details
-    index = 0
-    for index, line in enumerate(basket.all_lines()):
-        product = line.product
-        params['L_PAYMENTREQUEST_0_NAME%d' % index] = product.get_title()
-        params['L_PAYMENTREQUEST_0_NUMBER%d' % index] = (product.upc if
-                                                         product.upc else '')
-        desc = ''
-        if product.description:
-            desc = _format_description(product.description)
-        params['L_PAYMENTREQUEST_0_DESC%d' % index] = desc
-        # Note, we don't include discounts here - they are handled as separate
-        # lines - see below
-        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
-            line.unit_price_incl_tax)
-        params['L_PAYMENTREQUEST_0_QTY%d' % index] = line.quantity
-        params['L_PAYMENTREQUEST_0_ITEMCATEGORY%d' % index] = (
-            'Physical' if product.is_shipping_required else 'Digital')
-
-    # If the order has discounts associated with it, the way PayPal suggests
-    # using the API is to add a separate item for the discount with the value
-    # as a negative price.  See "Integrating Order Details into the Express
-    # Checkout Flow"
-    # https://cms.paypal.com/us/cgi-bin/?cmd=_render-content&content_ID=developer/e_howto_api_ECCustomizing
-
-    # Iterate over the 3 types of discount that can occur
+    is_multi_risk_offer = False
     for discount in basket.offer_discounts:
-        index += 1
-        name = _("Special Offer: %s") % discount['name']
-        params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
-        params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
-        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
-            -discount['discount'])
-        params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
-    for discount in basket.voucher_discounts:
-        index += 1
-        name = "%s (%s)" % (discount['voucher'].name,
-                            discount['voucher'].code)
-        params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
-        params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
-        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
-            -discount['discount'])
-        params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
-    for discount in basket.shipping_discounts:
-        index += 1
-        name = _("Shipping Offer: %s") % discount['name']
-        params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
-        params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
-        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
-            -discount['discount'])
-        params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
+        if discount['offer'].name == "Garantie multi-risques":
+            is_multi_risk_offer = True
+            break
 
-    # We include tax in the prices rather than separately as that's how it's
-    # done on most British/Australian sites.  Will need to refactor in the
-    # future no doubt.
+    if is_multi_risk_offer:
+        params.update({
+            'PAYMENTREQUEST_0_AMT': D('7.99'),
+            'PAYMENTREQUEST_0_CURRENCYCODE': 'EUR',
+            'RETURNURL': return_url,
+            'CANCELURL': cancel_url,
+            'PAYMENTREQUEST_0_PAYMENTACTION': 'Sale',
+            'L_PAYMENTREQUEST_0_NAME0': 'Weenect Tracker',
+            'L_PAYMENTREQUEST_0_NUMBER0': '',
+            'L_PAYMENTREQUEST_0_DESC0': '',
+            'L_PAYMENTREQUEST_0_AMT0': D('49.99'),
+            'L_PAYMENTREQUEST_0_QTY0': 1,
+            'L_PAYMENTREQUEST_0_ITEMCATEGORY0': 'Physical',
+            'L_PAYMENTREQUEST_0_NAME1': 'Warranty',
+            'L_PAYMENTREQUEST_0_DESC1': 'Warranty',
+            'L_PAYMENTREQUEST_0_AMT1': D('-49.99'),
+            'L_PAYMENTREQUEST_0_QTY1': 1,
+            'PAYMENTREQUEST_0_ITEMAMT': D('0.00'),
+            'PAYMENTREQUEST_0_TAXAMT': D('0.00'),
+            'CALLBACK': update_url,
+            'PAYMENTREQUEST_0_SHIPPINGAMT': D('7.99'),
+            'L_SHIPPINGOPTIONISDEFAULT0': 'true',
+            'L_SHIPPINGOPTIONNAME0': 'Delivery',
+            'L_SHIPPINGOPTIONAMOUNT0': D('7.99'),
+            'PAYMENTREQUEST_0_MAXAMT': D('7.99'),
+            'MAXAMT': D('7.99'),
+            'PAYMENTREQUEST_0_HANDLINGAMT': D('0.00')
+        })
+    else:
+        # PAYMENTREQUEST_0_AMT should include tax, shipping and handling
+        params.update({
+            'PAYMENTREQUEST_0_AMT': amount,
+            'PAYMENTREQUEST_0_CURRENCYCODE': currency,
+            'RETURNURL': return_url,
+            'CANCELURL': cancel_url,
+            'PAYMENTREQUEST_0_PAYMENTACTION': action,
+        })
 
-    # Note that the following constraint must be met
-    #
-    # PAYMENTREQUEST_0_AMT = (
-    #     PAYMENTREQUEST_0_ITEMAMT +
-    #     PAYMENTREQUEST_0_TAXAMT +
-    #     PAYMENTREQUEST_0_SHIPPINGAMT +
-    #     PAYMENTREQUEST_0_HANDLINGAMT)
-    #
-    # Hence, if tax is to be shown then it has to be aggregated up to the order
-    # level.
-    params['PAYMENTREQUEST_0_ITEMAMT'] = _format_currency(
-        basket.total_incl_tax)
-    params['PAYMENTREQUEST_0_TAXAMT'] = _format_currency(D('0.00'))
+        # Add item details
+        index = 0
+        for index, line in enumerate(basket.all_lines()):
+            product = line.product
+            params['L_PAYMENTREQUEST_0_NAME%d' % index] = product.get_title()
+            params['L_PAYMENTREQUEST_0_NUMBER%d' % index] = (product.upc if
+                                                             product.upc else '')
+            desc = ''
+            if product.description:
+                desc = _format_description(product.description)
+            params['L_PAYMENTREQUEST_0_DESC%d' % index] = desc
+            # Note, we don't include discounts here - they are handled as separate
+            # lines - see below
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
+                line.unit_price_incl_tax)
+            params['L_PAYMENTREQUEST_0_QTY%d' % index] = line.quantity
+            params['L_PAYMENTREQUEST_0_ITEMCATEGORY%d' % index] = (
+                'Physical' if product.is_shipping_required else 'Digital')
 
-    # Instant update callback information
-    if update_url:
-        params['CALLBACK'] = update_url
+        # If the order has discounts associated with it, the way PayPal suggests
+        # using the API is to add a separate item for the discount with the value
+        # as a negative price.  See "Integrating Order Details into the Express
+        # Checkout Flow"
+        # https://cms.paypal.com/us/cgi-bin/?cmd=_render-content&content_ID=developer/e_howto_api_ECCustomizing
 
-    # Contact details and address details - we provide these as it would make
-    # the PayPal registration process smoother is the user doesn't already have
-    # an account.
-    if user:
-        params['EMAIL'] = user.email
-    if user_address:
-        params['PAYMENTREQUEST_0_SHIPTONAME'] = user_address.name
-        params['PAYMENTREQUEST_0_SHIPTOSTREET'] = user_address.line1
-        params['PAYMENTREQUEST_0_SHIPTOSTREET2'] = user_address.line2
-        params['PAYMENTREQUEST_0_SHIPTOCITY'] = user_address.line4
-        params['PAYMENTREQUEST_0_SHIPTOSTATE'] = user_address.state
-        params['PAYMENTREQUEST_0_SHIPTOZIP'] = user_address.postcode
-        params['PAYMENTREQUEST_0_SHIPTOCOUNTRYCODE'] = user_address.country.iso_3166_1_a2
-        params['PAYMENTREQUEST_0_SHIPTOPHONENUM'] = user_address.phone_number
+        # Iterate over the 3 types of discount that can occur
+        for discount in basket.offer_discounts:
+            index += 1
+            name = _("Special Offer: %s") % discount['name']
+            params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
+            params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
+                -discount['discount'])
+            params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
+        for discount in basket.voucher_discounts:
+            index += 1
+            name = "%s (%s)" % (discount['voucher'].name,
+                                discount['voucher'].code)
+            params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
+            params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
+                -discount['discount'])
+            params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
+        for discount in basket.shipping_discounts:
+            index += 1
+            name = _("Shipping Offer: %s") % discount['name']
+            params['L_PAYMENTREQUEST_0_NAME%d' % index] = name
+            params['L_PAYMENTREQUEST_0_DESC%d' % index] = _format_description(name)
+            params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(
+                -discount['discount'])
+            params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
 
-    # Shipping details (if already set) - we override the SHIPTO* fields and
-    # set a flag to indicate that these can't be altered on the PayPal side.
-    if shipping_method and shipping_address:
-        params['ADDROVERRIDE'] = 1
-        # It's recommend not to set 'confirmed shipping' if supplying the
-        # shipping address directly.
-        params['REQCONFIRMSHIPPING'] = 0
-        params['PAYMENTREQUEST_0_SHIPTONAME'] = shipping_address.name
-        params['PAYMENTREQUEST_0_SHIPTOSTREET'] = shipping_address.line1
-        params['PAYMENTREQUEST_0_SHIPTOSTREET2'] = shipping_address.line2
-        params['PAYMENTREQUEST_0_SHIPTOCITY'] = shipping_address.line4
-        params['PAYMENTREQUEST_0_SHIPTOSTATE'] = shipping_address.state
-        params['PAYMENTREQUEST_0_SHIPTOZIP'] = shipping_address.postcode
-        params['PAYMENTREQUEST_0_SHIPTOCOUNTRYCODE'] = shipping_address.country.iso_3166_1_a2
-        params['PAYMENTREQUEST_0_SHIPTOPHONENUM'] = shipping_address.phone_number
+        # We include tax in the prices rather than separately as that's how it's
+        # done on most British/Australian sites.  Will need to refactor in the
+        # future no doubt.
 
-        # For US addresses, we need to try and convert the state into 2 letter
-        # code - otherwise we can get a 10736 error as the shipping address and
-        # zipcode don't match the state. Very silly really.
-        if params['PAYMENTREQUEST_0_SHIPTOCOUNTRYCODE'] == 'US':
-            key = params['PAYMENTREQUEST_0_SHIPTOSTATE'].lower().strip()
-            if key in us_states.STATES_NORMALIZED:
-                params['PAYMENTREQUEST_0_SHIPTOSTATE'] = us_states.STATES_NORMALIZED[key]
+        # Note that the following constraint must be met
+        #
+        # PAYMENTREQUEST_0_AMT = (
+        #     PAYMENTREQUEST_0_ITEMAMT +
+        #     PAYMENTREQUEST_0_TAXAMT +
+        #     PAYMENTREQUEST_0_SHIPPINGAMT +
+        #     PAYMENTREQUEST_0_HANDLINGAMT)
+        #
+        # Hence, if tax is to be shown then it has to be aggregated up to the order
+        # level.
+        params['PAYMENTREQUEST_0_ITEMAMT'] = _format_currency(
+            basket.total_incl_tax)
+        params['PAYMENTREQUEST_0_TAXAMT'] = _format_currency(D('0.00'))
 
-    elif no_shipping:
-        params['NOSHIPPING'] = 1
+        # Instant update callback information
+        if update_url:
+            params['CALLBACK'] = update_url
 
-    # Shipping charges
-    params['PAYMENTREQUEST_0_SHIPPINGAMT'] = _format_currency(D('0.00'))
-    max_charge = D('0.00')
-    for index, method in enumerate(shipping_methods):
-        is_default = index == 0
-        params['L_SHIPPINGOPTIONISDEFAULT%d' % index] = 'true' if is_default else 'false'
-        charge = method.calculate(basket).incl_tax
+        # Contact details and address details - we provide these as it would make
+        # the PayPal registration process smoother is the user doesn't already have
+        # an account.
+        if user:
+            params['EMAIL'] = user.email
+        if user_address:
+            params['PAYMENTREQUEST_0_SHIPTONAME'] = user_address.name
+            params['PAYMENTREQUEST_0_SHIPTOSTREET'] = user_address.line1
+            params['PAYMENTREQUEST_0_SHIPTOSTREET2'] = user_address.line2
+            params['PAYMENTREQUEST_0_SHIPTOCITY'] = user_address.line4
+            params['PAYMENTREQUEST_0_SHIPTOSTATE'] = user_address.state
+            params['PAYMENTREQUEST_0_SHIPTOZIP'] = user_address.postcode
+            params['PAYMENTREQUEST_0_SHIPTOCOUNTRYCODE'] = user_address.country.iso_3166_1_a2
+            params['PAYMENTREQUEST_0_SHIPTOPHONENUM'] = user_address.phone_number
 
-        if charge > max_charge:
-            max_charge = charge
-        if is_default:
+        # Shipping details (if already set) - we override the SHIPTO* fields and
+        # set a flag to indicate that these can't be altered on the PayPal side.
+        if shipping_method and shipping_address:
+            params['ADDROVERRIDE'] = 1
+            # It's recommend not to set 'confirmed shipping' if supplying the
+            # shipping address directly.
+            params['REQCONFIRMSHIPPING'] = 0
+            params['PAYMENTREQUEST_0_SHIPTONAME'] = shipping_address.name
+            params['PAYMENTREQUEST_0_SHIPTOSTREET'] = shipping_address.line1
+            params['PAYMENTREQUEST_0_SHIPTOSTREET2'] = shipping_address.line2
+            params['PAYMENTREQUEST_0_SHIPTOCITY'] = shipping_address.line4
+            params['PAYMENTREQUEST_0_SHIPTOSTATE'] = shipping_address.state
+            params['PAYMENTREQUEST_0_SHIPTOZIP'] = shipping_address.postcode
+            params['PAYMENTREQUEST_0_SHIPTOCOUNTRYCODE'] = shipping_address.country.iso_3166_1_a2
+            params['PAYMENTREQUEST_0_SHIPTOPHONENUM'] = shipping_address.phone_number
+
+            # For US addresses, we need to try and convert the state into 2 letter
+            # code - otherwise we can get a 10736 error as the shipping address and
+            # zipcode don't match the state. Very silly really.
+            if params['PAYMENTREQUEST_0_SHIPTOCOUNTRYCODE'] == 'US':
+                key = params['PAYMENTREQUEST_0_SHIPTOSTATE'].lower().strip()
+                if key in us_states.STATES_NORMALIZED:
+                    params['PAYMENTREQUEST_0_SHIPTOSTATE'] = us_states.STATES_NORMALIZED[key]
+
+        elif no_shipping:
+            params['NOSHIPPING'] = 1
+
+        # Shipping charges
+        params['PAYMENTREQUEST_0_SHIPPINGAMT'] = _format_currency(D('0.00'))
+        max_charge = D('0.00')
+        for index, method in enumerate(shipping_methods):
+            is_default = index == 0
+            params['L_SHIPPINGOPTIONISDEFAULT%d' % index] = 'true' if is_default else 'false'
+            charge = method.calculate(basket).incl_tax
+
+            if charge > max_charge:
+                max_charge = charge
+            if is_default:
+                params['PAYMENTREQUEST_0_SHIPPINGAMT'] = _format_currency(charge)
+                params['PAYMENTREQUEST_0_AMT'] += charge
+            params['L_SHIPPINGOPTIONNAME%d' % index] = str(method.name)
+            params['L_SHIPPINGOPTIONAMOUNT%d' % index] = _format_currency(charge)
+
+        # Set shipping charge explicitly if it has been passed
+        if shipping_method:
+            charge = shipping_method.calculate(basket).incl_tax
             params['PAYMENTREQUEST_0_SHIPPINGAMT'] = _format_currency(charge)
             params['PAYMENTREQUEST_0_AMT'] += charge
-        params['L_SHIPPINGOPTIONNAME%d' % index] = str(method.name)
-        params['L_SHIPPINGOPTIONAMOUNT%d' % index] = _format_currency(charge)
 
-    # Set shipping charge explicitly if it has been passed
-    if shipping_method:
-        charge = shipping_method.calculate(basket).incl_tax
-        params['PAYMENTREQUEST_0_SHIPPINGAMT'] = _format_currency(charge)
-        params['PAYMENTREQUEST_0_AMT'] += charge
+        # Both the old version (MAXAMT) and the new version (PAYMENT...) are needed
+        # here - think it's a problem with the API.
+        params['PAYMENTREQUEST_0_MAXAMT'] = _format_currency(amount + max_charge)
+        params['MAXAMT'] = _format_currency(amount + max_charge)
 
-    # Both the old version (MAXAMT) and the new version (PAYMENT...) are needed
-    # here - think it's a problem with the API.
-    params['PAYMENTREQUEST_0_MAXAMT'] = _format_currency(amount + max_charge)
-    params['MAXAMT'] = _format_currency(amount + max_charge)
+        # Handling set to zero for now - I've never worked on a site that needed a
+        # handling charge.
+        params['PAYMENTREQUEST_0_HANDLINGAMT'] = _format_currency(D('0.00'))
 
-    # Handling set to zero for now - I've never worked on a site that needed a
-    # handling charge.
-    params['PAYMENTREQUEST_0_HANDLINGAMT'] = _format_currency(D('0.00'))
-
-    # Ensure that the total is formatted correctly.
-    params['PAYMENTREQUEST_0_AMT'] = _format_currency(
-        params['PAYMENTREQUEST_0_AMT'])
+        # Ensure that the total is formatted correctly.
+        params['PAYMENTREQUEST_0_AMT'] = _format_currency(
+            params['PAYMENTREQUEST_0_AMT'])
 
     txn = _fetch_response(SET_EXPRESS_CHECKOUT, params)
 
