@@ -176,10 +176,17 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         logger.error(msg)
         raise express_exceptions.InvalidBasket(_(msg))
 
-    if amount <= 0:
-        msg = 'The basket total is zero so no payment is required'
-        logger.error(msg)
-        raise express_exceptions.InvalidBasket(_(msg))
+    # if amount <= 0:
+    #     msg = 'The basket total is zero so no payment is required'
+    #     logger.error(msg)
+    #     raise express_exceptions.InvalidBasket(_(msg))
+    #
+
+    is_multi_risk_offer = False
+    for discount in basket.offer_discounts:
+        if discount['offer'].name == "Garantie multi-risques":
+            is_multi_risk_offer = True
+            break
 
     # PAYMENTREQUEST_0_AMT should include tax, shipping and handling
     params.update({
@@ -340,6 +347,39 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
     # Ensure that the total is formatted correctly.
     params['PAYMENTREQUEST_0_AMT'] = _format_currency(
         params['PAYMENTREQUEST_0_AMT'])
+
+    logger.exception("%s", params)
+
+    if is_multi_risk_offer:
+        params = {
+            "ALLOWNOTE": 1,
+            "CALLBACKTIMEOUT": 3,
+            "PAYMENTREQUEST_0_AMT": D("7.99"),
+            "PAYMENTREQUEST_0_CURRENCYCODE": currency,
+            "RETURNURL": return_url,
+            "CANCELURL": cancel_url,
+            "PAYMENTREQUEST_0_PAYMENTACTION": "Sale",
+            "L_PAYMENTREQUEST_0_NAME0": "Tracker",
+            "L_PAYMENTREQUEST_0_NUMBER0": "",
+            "L_PAYMENTREQUEST_0_DESC0": "",
+            "L_PAYMENTREQUEST_0_AMT0": D("49.99"),
+            "L_PAYMENTREQUEST_0_QTY0": 1,
+            "L_PAYMENTREQUEST_0_ITEMCATEGORY0": "Physical",
+            "L_PAYMENTREQUEST_0_NAME1": "Offer",
+            "L_PAYMENTREQUEST_0_DESC1": "",
+            "L_PAYMENTREQUEST_0_AMT1": D("-49.99"),
+            "L_PAYMENTREQUEST_0_QTY1": 1,
+            "PAYMENTREQUEST_0_ITEMAMT": D("0.00"),
+            "PAYMENTREQUEST_0_TAXAMT": D("0.00"),
+            "CALLBACK": update_url,
+            "PAYMENTREQUEST_0_SHIPPINGAMT": D("7.99"),
+            "L_SHIPPINGOPTIONISDEFAULT0": "true",
+            "L_SHIPPINGOPTIONNAME0": "Prix de livraison fixe",
+            "L_SHIPPINGOPTIONAMOUNT0": D("7.99"),
+            "PAYMENTREQUEST_0_MAXAMT": D("7.99"),
+            "MAXAMT": D("7.99"),
+            "PAYMENTREQUEST_0_HANDLINGAMT": D("0.00"),
+        }
 
     txn = _fetch_response(SET_EXPRESS_CHECKOUT, params)
 
