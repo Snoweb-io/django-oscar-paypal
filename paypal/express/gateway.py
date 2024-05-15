@@ -216,6 +216,13 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         params['L_PAYMENTREQUEST_0_ITEMCATEGORY%d' % index] = (
             'Physical' if product.is_shipping_required else 'Digital')
 
+    if is_multi_risk_offer:
+        index += 1
+        params['L_PAYMENTREQUEST_0_NAME%d' % index] = "Delivery"
+        params['L_PAYMENTREQUEST_0_DESC%d' % index] = "Delivery"
+        params['L_PAYMENTREQUEST_0_AMT%d' % index] = _format_currency(D('7.99'))
+        params['L_PAYMENTREQUEST_0_QTY%d' % index] = 1
+
     # If the order has discounts associated with it, the way PayPal suggests
     # using the API is to add a separate item for the discount with the value
     # as a negative price.  See "Integrating Order Details into the Express
@@ -351,35 +358,8 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
     logger.exception("%s", params)
 
     if is_multi_risk_offer:
-        params = {
-            "ALLOWNOTE": 1,
-            "CALLBACKTIMEOUT": 3,
-            "PAYMENTREQUEST_0_AMT": D("7.99"),
-            "PAYMENTREQUEST_0_CURRENCYCODE": currency,
-            "RETURNURL": return_url,
-            "CANCELURL": cancel_url,
-            "PAYMENTREQUEST_0_PAYMENTACTION": "Sale",
-            "L_PAYMENTREQUEST_0_NAME0": "Tracker",
-            "L_PAYMENTREQUEST_0_NUMBER0": "",
-            "L_PAYMENTREQUEST_0_DESC0": "",
-            "L_PAYMENTREQUEST_0_AMT0": D("49.99"),
-            "L_PAYMENTREQUEST_0_QTY0": 1,
-            "L_PAYMENTREQUEST_0_ITEMCATEGORY0": "Physical",
-            "L_PAYMENTREQUEST_0_NAME1": "Offer",
-            "L_PAYMENTREQUEST_0_DESC1": "",
-            "L_PAYMENTREQUEST_0_AMT1": D("-49.99"),
-            "L_PAYMENTREQUEST_0_QTY1": 1,
-            "PAYMENTREQUEST_0_ITEMAMT": D("0.00"),
-            "PAYMENTREQUEST_0_TAXAMT": D("0.00"),
-            "CALLBACK": update_url,
-            "PAYMENTREQUEST_0_SHIPPINGAMT": D("7.99"),
-            "L_SHIPPINGOPTIONISDEFAULT0": "true",
-            "L_SHIPPINGOPTIONNAME0": "Prix de livraison fixe",
-            "L_SHIPPINGOPTIONAMOUNT0": D("7.99"),
-            "PAYMENTREQUEST_0_MAXAMT": D("7.99"),
-            "MAXAMT": D("7.99"),
-            "PAYMENTREQUEST_0_HANDLINGAMT": D("0.00"),
-        }
+        params["PAYMENTREQUEST_0_SHIPPINGAMT"] = D("0.00")
+        params["L_SHIPPINGOPTIONAMOUNT0"] = D("0.00")
 
     txn = _fetch_response(SET_EXPRESS_CHECKOUT, params)
 
